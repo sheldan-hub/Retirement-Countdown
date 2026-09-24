@@ -1,0 +1,57 @@
+name: 仓库保活（防60天自动禁用）
+
+# ┌────────────────────────────────────────────────────────────┐
+# │ 为什么需要这个工作流？                                        │
+# │                                                              │
+# │ GitHub 官方行为：当一个仓库连续 60 天没有任何活动（commit     │
+# │ 等）时，GitHub 会自动禁用该仓库所有 schedule 定时任务，        │
+# │ 并在 Actions 页面显示「This scheduled workflow is disabled    │
+# │ because this repository has been inactive for 60 days」。     │
+# │                                                              │
+# │ 本工作流每周自动提交一次时间戳文件，让仓库持续保持活跃，       │
+# │ 从而避免倒计时推送任务被自动禁用。                            │
+# │                                                              │
+# │ 注意：本工作流自身也是 schedule 触发，所以它必须在 60 天内     │
+# │ 至少成功运行过一次——每周执行一次远低于 60 天阈值，安全。      │
+# └────────────────────────────────────────────────────────────┘
+on:
+  schedule:
+    # 每周一 UTC 03:13（北京时间 11:13）执行一次
+    - cron: '13 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  # 需要写入权限才能提交并推送
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 若配置了 GH_PAT 则优先使用（PAT 的提交更可靠地算作仓库活动）
+          # 未配置时自动回退到内置的 GITHUB_TOKEN
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: 写入保活时间戳
+        run: |
+          mkdir -p .keepalive
+          date -u '+%Y-%m-%d %H:%M:%S UTC' > .keepalive/last-active.txt
+          echo "本次保活时间戳：$(cat .keepalive/last-active.txt)"
+
+      - name: 提交并推送
+        run: |
+          git config user.name "retirement-countdown-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add .keepalive/last-active.txt
+          if git diff --cached --quiet; then
+            echo "内容与上次相同，跳过提交（仓库仍算有活动）"
+          else
+            git commit -m "chore: keepalive $(date -u '+%Y-%m-%d') [skip ci]"
+            git push
+            echo "✓ 保活提交已推送"
+          fi

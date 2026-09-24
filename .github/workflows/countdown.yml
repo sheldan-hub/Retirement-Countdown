@@ -1,0 +1,52 @@
+name: 退休倒计时推送
+
+# ┌────────────────────────────────────────────────────────────┐
+# │ 触发方式说明                                                │
+# │ 1. schedule：每天定时自动运行                                │
+# │    ⚠ cron 使用 UTC 时间。北京时间 = UTC + 8                  │
+# │    这里设为 UTC 00:07 → 北京时间 08:07                       │
+# │    ⚠ 故意避开整点(:00)：GitHub 在整点会集中排队，            │
+# │      schedule 常延迟 5~30 分钟甚至更久，非整点能明显降低延迟  │
+# │ 2. workflow_dispatch：手动触发 / 外部 cron 通过 API 触发      │
+# │    ⚠ 重要：GitHub 的「60天无活动禁用」只作用于 schedule，     │
+# │      workflow_dispatch 不受影响，这是最可靠的兜底通道         │
+# └────────────────────────────────────────────────────────────┘
+on:
+  schedule:
+    - cron: '7 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  countdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 推送退休倒计时到微信
+        env:
+          # SendKey 从仓库 Secrets 读取，切勿硬编码在代码里
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          # 退休日期，改这里即可
+          RETIRE_DATE: '2036-08-30'
+        run: python3 push.py
+
+      - name: 失败排查提示
+        if: failure()
+        run: |
+          echo "::error::推送失败，请按以下顺序排查："
+          echo "1) 仓库 Settings → Secrets and variables → Actions 中是否配置了 SERVERCHAN_KEY"
+          echo "2) Server酱 SendKey 是否仍有效（官网登录查看额度是否用尽）"
+          echo "3) 本任务上方日志中的具体报错信息"
+          echo "4) 若连续多日未收到，检查本仓库 Actions 页面顶部是否有"
+          echo "   「This scheduled workflow is disabled...」的禁用提示（60天无活动导致）"
